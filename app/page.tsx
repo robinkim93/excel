@@ -75,7 +75,7 @@ export default function Home() {
   const [showColumnMapping, setShowColumnMapping] = useState(false);
   const [manualColumnMapping, setManualColumnMapping] = useState<Map<number, number> | null>(null);
   
-  // 날짜 및 사이즈 컬럼 선택
+  // 날짜 및 사이즈 컬럼 선택 (선택사항)
   const [dateCol1, setDateCol1] = useState<number | null>(null);
   const [dateCol2, setDateCol2] = useState<number | null>(null);
   const [sizeCol1, setSizeCol1] = useState<number | null>(null);
@@ -126,35 +126,42 @@ export default function Home() {
   }, [manualColumnMapping, autoMatchedMapping]);
   
   // 행 매칭 정보 (useMemo로 계산)
+  // 키 컬럼이 설정되어 있으면 키 기반 매칭, 없으면 인덱스 기반 매칭
   const rowMatches = useMemo(() => {
     if (file1Data.length === 0 || file2Data.length === 0) return new Map<number, number>();
-    if (dateCol1 === null || dateCol2 === null || sizeCol1 === null || sizeCol2 === null) {
-      return new Map<number, number>();
-    }
     
     const matches = new Map<number, number>();
     
-    // file2의 날짜+사이즈 조합을 키로 하는 맵 생성
-    const file2KeyMap = new Map<string, number>();
-    for (let row2 = 1; row2 < file2Data.length; row2++) {
-      const row2Data = file2Data[row2] || [];
-      const date2 = String(row2Data[dateCol2] ?? "").trim();
-      const size2 = String(row2Data[sizeCol2] ?? "").trim();
-      const key = `${date2}|${size2}`;
-      if (date2 && size2) {
-        file2KeyMap.set(key, row2);
+    // 키 컬럼이 모두 설정되어 있으면 키 기반 매칭
+    if (dateCol1 !== null && dateCol2 !== null && sizeCol1 !== null && sizeCol2 !== null) {
+      // file2의 날짜+사이즈 조합을 키로 하는 맵 생성
+      const file2KeyMap = new Map<string, number>();
+      for (let row2 = 1; row2 < file2Data.length; row2++) {
+        const row2Data = file2Data[row2] || [];
+        const date2 = String(row2Data[dateCol2] ?? "").trim();
+        const size2 = String(row2Data[sizeCol2] ?? "").trim();
+        const key = `${date2}|${size2}`;
+        if (date2 && size2) {
+          file2KeyMap.set(key, row2);
+        }
       }
-    }
-    
-    // file1의 각 행에 대해 매칭되는 file2 행 찾기
-    for (let row1 = 1; row1 < file1Data.length; row1++) {
-      const row1Data = file1Data[row1] || [];
-      const date1 = String(row1Data[dateCol1] ?? "").trim();
-      const size1 = String(row1Data[sizeCol1] ?? "").trim();
-      const key = `${date1}|${size1}`;
       
-      if (date1 && size1 && file2KeyMap.has(key)) {
-        matches.set(row1, file2KeyMap.get(key)!);
+      // file1의 각 행에 대해 매칭되는 file2 행 찾기
+      for (let row1 = 1; row1 < file1Data.length; row1++) {
+        const row1Data = file1Data[row1] || [];
+        const date1 = String(row1Data[dateCol1] ?? "").trim();
+        const size1 = String(row1Data[sizeCol1] ?? "").trim();
+        const key = `${date1}|${size1}`;
+        
+        if (date1 && size1 && file2KeyMap.has(key)) {
+          matches.set(row1, file2KeyMap.get(key)!);
+        }
+      }
+    } else {
+      // 키 컬럼이 없으면 인덱스 기반 매칭 (같은 행 인덱스끼리 매칭)
+      const maxRows = Math.min(file1Data.length - 1, file2Data.length - 1);
+      for (let row = 1; row <= maxRows; row++) {
+        matches.set(row, row);
       }
     }
     
@@ -216,11 +223,6 @@ export default function Home() {
       return;
     }
     
-    if (dateCol1 === null || dateCol2 === null || sizeCol1 === null || sizeCol2 === null) {
-      alert("날짜 및 사이즈 컬럼을 선택해주세요.");
-      return;
-    }
-    
     const diffSet = new Set<string>();
     const headers1 = file1Data[0] || [];
     
@@ -231,8 +233,9 @@ export default function Home() {
       
       // file1의 각 컬럼에 대해 매핑된 file2 컬럼과 비교
       headers1.forEach((_, col1Index) => {
-        // 날짜와 사이즈 컬럼은 비교에서 제외
-        if (col1Index === dateCol1 || col1Index === sizeCol1) return;
+        // 키 컬럼이 설정되어 있으면 비교에서 제외
+        if (dateCol1 !== null && col1Index === dateCol1) return;
+        if (sizeCol1 !== null && col1Index === sizeCol1) return;
         
         const col2Index = columnMapping.get(col1Index);
         
@@ -313,6 +316,9 @@ export default function Home() {
     setTooltip(null);
   };
   
+  // 키 컬럼이 설정되어 있는지 확인
+  const hasKeyColumns = dateCol1 !== null && dateCol2 !== null && sizeCol1 !== null && sizeCol2 !== null;
+  
   return (
     <div className="w-full h-full p-4 relative bg-gray-900 text-white min-h-screen">
       <div className="mb-4 space-y-2">
@@ -339,10 +345,15 @@ export default function Home() {
           />
         </div>
         
-        {/* 날짜 및 사이즈 컬럼 선택 */}
+        {/* 날짜 및 사이즈 컬럼 선택 (선택사항) */}
         {file1Data.length > 0 && file2Data.length > 0 && (
           <div className="border border-gray-600 p-4 rounded bg-gray-800">
-            <h3 className="font-semibold text-white mb-3">키 컬럼 선택 (날짜 및 사이즈)</h3>
+            <h3 className="font-semibold text-white mb-3">
+              키 컬럼 선택 (선택사항 - 날짜 및 사이즈)
+            </h3>
+            <p className="text-xs text-gray-400 mb-3">
+              키 컬럼을 설정하면 해당 컬럼 값으로 행을 매칭합니다. 설정하지 않으면 같은 행 인덱스끼리 매칭됩니다.
+            </p>
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <h4 className="text-sm font-medium text-gray-300 mb-2">내부 파일</h4>
@@ -354,7 +365,7 @@ export default function Home() {
                       onChange={(e) => setDateCol1(e.target.value === "" ? null : parseInt(e.target.value))}
                       className="w-full px-2 py-1 border border-gray-600 rounded text-sm bg-gray-700 text-white"
                     >
-                      <option value="">선택하세요</option>
+                      <option value="">선택 안함</option>
                       {headers1.map((header, index) => (
                         <option key={index} value={index} className="bg-gray-700">
                           {String(header) || `컬럼 ${index + 1}`}
@@ -369,7 +380,7 @@ export default function Home() {
                       onChange={(e) => setSizeCol1(e.target.value === "" ? null : parseInt(e.target.value))}
                       className="w-full px-2 py-1 border border-gray-600 rounded text-sm bg-gray-700 text-white"
                     >
-                      <option value="">선택하세요</option>
+                      <option value="">선택 안함</option>
                       {headers1.map((header, index) => (
                         <option key={index} value={index} className="bg-gray-700">
                           {String(header) || `컬럼 ${index + 1}`}
@@ -389,7 +400,7 @@ export default function Home() {
                       onChange={(e) => setDateCol2(e.target.value === "" ? null : parseInt(e.target.value))}
                       className="w-full px-2 py-1 border border-gray-600 rounded text-sm bg-gray-700 text-white"
                     >
-                      <option value="">선택하세요</option>
+                      <option value="">선택 안함</option>
                       {headers2.map((header, index) => (
                         <option key={index} value={index} className="bg-gray-700">
                           {String(header) || `컬럼 ${index + 1}`}
@@ -404,7 +415,7 @@ export default function Home() {
                       onChange={(e) => setSizeCol2(e.target.value === "" ? null : parseInt(e.target.value))}
                       className="w-full px-2 py-1 border border-gray-600 rounded text-sm bg-gray-700 text-white"
                     >
-                      <option value="">선택하세요</option>
+                      <option value="">선택 안함</option>
                       {headers2.map((header, index) => (
                         <option key={index} value={index} className="bg-gray-700">
                           {String(header) || `컬럼 ${index + 1}`}
@@ -416,8 +427,11 @@ export default function Home() {
               </div>
             </div>
             {rowMatches.size > 0 && (
-              <div className="mt-3 text-sm text-green-400">
-                매칭된 행: {rowMatches.size}개
+              <div className="mt-3 text-sm">
+                <span className={hasKeyColumns ? "text-green-400" : "text-yellow-400"}>
+                  매칭된 행: {rowMatches.size}개
+                  {hasKeyColumns ? " (키 컬럼 기반)" : " (인덱스 기반)"}
+                </span>
               </div>
             )}
           </div>
@@ -447,8 +461,9 @@ export default function Home() {
             {showColumnMapping && (
               <div className="space-y-2 max-h-60 overflow-y-auto">
                 {headers1.map((header1, index1) => {
-                  // 날짜와 사이즈 컬럼은 매칭에서 제외
-                  if (index1 === dateCol1 || index1 === sizeCol1) return null;
+                  // 키 컬럼이 설정되어 있으면 매칭에서 제외
+                  if (dateCol1 !== null && index1 === dateCol1) return null;
+                  if (sizeCol1 !== null && index1 === sizeCol1) return null;
                   
                   const mappedIndex = columnMapping.get(index1);
                   const header1Str = String(header1);
@@ -474,8 +489,9 @@ export default function Home() {
                       >
                         <option value="" className="bg-gray-800">(매칭 안함)</option>
                         {headers2.map((header2, index2) => {
-                          // 날짜와 사이즈 컬럼은 매칭에서 제외
-                          if (index2 === dateCol2 || index2 === sizeCol2) return null;
+                          // 키 컬럼이 설정되어 있으면 매칭에서 제외
+                          if (dateCol2 !== null && index2 === dateCol2) return null;
+                          if (sizeCol2 !== null && index2 === sizeCol2) return null;
                           return (
                             <option key={index2} value={index2} className="bg-gray-800">
                               {String(header2) || `(비어있음)`}
@@ -521,7 +537,7 @@ export default function Home() {
                 {headers1.map((header, index) => {
                   const mappedIndex = columnMapping.get(index);
                   const mappedHeader = mappedIndex !== undefined ? headers2[mappedIndex] : null;
-                  const isKeyColumn = index === dateCol1 || index === sizeCol1;
+                  const isKeyColumn = (dateCol1 !== null && index === dateCol1) || (sizeCol1 !== null && index === sizeCol1);
                   return (
                     <th key={index} className={`px-4 py-2 border border-gray-600 bg-gray-800 text-white text-left truncate ${isKeyColumn ? "bg-blue-900" : ""}`}>
                       <div className="font-semibold text-white">{String(header)}</div>
