@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useMemo, useRef } from "react";
 import { read, utils } from "xlsx";
+import { Decimal } from "decimal.js";
 
 type CellPosition = {
   row: number;
@@ -63,6 +64,37 @@ const calculateSimilarity = (str1: string, str2: string): number => {
   
   if (longer.length === 0) return 1;
   return (longer.length - editDistance) / longer.length;
+};
+
+// 숫자인지 확인하는 함수
+const isNumeric = (value: string | number): boolean => {
+  if (typeof value === 'number') return !isNaN(value) && isFinite(value);
+  if (typeof value !== 'string') return false;
+  const trimmed = value.trim();
+  if (trimmed === '') return false;
+  // 숫자 형식 확인 (정수, 소수, 과학적 표기법 포함)
+  return /^-?\d+(\.\d+)?([eE][+-]?\d+)?$/.test(trimmed);
+};
+
+// 두 값을 비교하는 함수 (숫자는 Decimal.js로, 문자열은 일반 비교)
+const compareValues = (val1: string | number, val2: string | number): boolean => {
+  const str1 = String(val1 ?? "").trim();
+  const str2 = String(val2 ?? "").trim();
+  
+  // 둘 다 숫자인 경우 Decimal.js로 비교
+  if (isNumeric(str1) && isNumeric(str2)) {
+    try {
+      const dec1 = new Decimal(str1);
+      const dec2 = new Decimal(str2);
+      return dec1.equals(dec2);
+    } catch (error) {
+      // Decimal.js 파싱 실패 시 문자열 비교로 폴백
+      return str1 === str2;
+    }
+  }
+  
+  // 하나라도 숫자가 아니면 문자열 비교
+  return str1 === str2;
 };
 
 export default function Home() {
@@ -183,6 +215,19 @@ export default function Home() {
     return Array.from(rows).sort((a, b) => a - b);
   }, [differences]);
   
+  // 특정 불일치 행으로 이동하는 함수
+  const scrollToDiffRow = useCallback((rowIndex: number) => {
+    const rowElement = rowRefs.current.get(rowIndex);
+    if (rowElement) {
+      rowElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      // 하이라이트 효과를 위한 클래스 추가
+      rowElement.classList.add('highlight-row');
+      setTimeout(() => {
+        rowElement.classList.remove('highlight-row');
+      }, 2000);
+    }
+  }, []);
+  
   // 파일 읽기 함수
   const readExcelFile = (file: File, fileNumber: 1 | 2) => {
     const reader = new FileReader();
@@ -238,17 +283,8 @@ export default function Home() {
     setCurrentDiffIndex(nextIndex);
     
     const rowIndex = diffRows[nextIndex];
-    const rowElement = rowRefs.current.get(rowIndex);
-    
-    if (rowElement) {
-      rowElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      // 하이라이트 효과를 위한 클래스 추가
-      rowElement.classList.add('highlight-row');
-      setTimeout(() => {
-        rowElement.classList.remove('highlight-row');
-      }, 2000);
-    }
-  }, [currentDiffIndex, diffRows]);
+    scrollToDiffRow(rowIndex);
+  }, [currentDiffIndex, diffRows, scrollToDiffRow]);
   
   // 이전 불일치 행으로 이동
   const goToPrevDiff = useCallback(() => {
@@ -258,17 +294,8 @@ export default function Home() {
     setCurrentDiffIndex(prevIndex);
     
     const rowIndex = diffRows[prevIndex];
-    const rowElement = rowRefs.current.get(rowIndex);
-    
-    if (rowElement) {
-      rowElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      // 하이라이트 효과를 위한 클래스 추가
-      rowElement.classList.add('highlight-row');
-      setTimeout(() => {
-        rowElement.classList.remove('highlight-row');
-      }, 2000);
-    }
-  }, [currentDiffIndex, diffRows]);
+    scrollToDiffRow(rowIndex);
+  }, [currentDiffIndex, diffRows, scrollToDiffRow]);
   
   // 두 파일 비교 함수 (행 매칭 사용)
   const compareFiles = () => {
@@ -297,10 +324,8 @@ export default function Home() {
           const cell1 = row1[col1Index];
           const cell2 = row2[col2Index];
           
-          const val1 = String(cell1 ?? "").trim();
-          const val2 = String(cell2 ?? "").trim();
-          
-          if (val1 !== val2) {
+          // compareValues 함수를 사용하여 숫자는 Decimal.js로, 문자열은 일반 비교
+          if (!compareValues(cell1, cell2)) {
             // displayData 기준으로 표시하기 위해 row1Index를 사용
             diffSet.add(`${row1Index}-${col1Index}`);
           }
@@ -308,8 +333,24 @@ export default function Home() {
       });
     });
     
+    // 불일치 행 목록 계산
+    const rows = new Set<number>();
+    diffSet.forEach((key) => {
+      const [rowIndex] = key.split('-').map(Number);
+      rows.add(rowIndex);
+    });
+    const sortedDiffRows = Array.from(rows).sort((a, b) => a - b);
+    
     setDifferences(diffSet);
     setCurrentDiffIndex(0); // 비교 후 첫 번째 불일치로 리셋
+    
+    // 첫 번째 불일치 행으로 자동 이동 (상태 업데이트 후 DOM 렌더링 대기)
+    if (sortedDiffRows.length > 0) {
+      setTimeout(() => {
+        scrollToDiffRow(sortedDiffRows[0]);
+      }, 100);
+    }
+    
     console.log("차이점 개수:", diffSet.size);
   };
   
