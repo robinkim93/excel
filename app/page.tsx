@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useRef } from "react";
 import { read, utils } from "xlsx";
 
 type CellPosition = {
@@ -74,12 +74,16 @@ export default function Home() {
   const [tooltip, setTooltip] = useState<TooltipPosition>(null);
   const [showColumnMapping, setShowColumnMapping] = useState(false);
   const [manualColumnMapping, setManualColumnMapping] = useState<Map<number, number> | null>(null);
+  const [currentDiffIndex, setCurrentDiffIndex] = useState<number>(0);
   
   // 날짜 및 사이즈 컬럼 선택 (선택사항)
   const [dateCol1, setDateCol1] = useState<number | null>(null);
   const [dateCol2, setDateCol2] = useState<number | null>(null);
   const [sizeCol1, setSizeCol1] = useState<number | null>(null);
   const [sizeCol2, setSizeCol2] = useState<number | null>(null);
+  
+  const tableRef = useRef<HTMLDivElement>(null);
+  const rowRefs = useRef<Map<number, HTMLTableRowElement>>(new Map());
   
   // 자동 매칭된 컬럼 매핑 (useMemo로 계산)
   const autoMatchedMapping = useMemo(() => {
@@ -169,6 +173,16 @@ export default function Home() {
     return matches;
   }, [dateCol1, dateCol2, sizeCol1, sizeCol2, file1Data, file2Data]);
   
+  // 불일치 행 목록 추출 (정렬된 행 인덱스)
+  const diffRows = useMemo(() => {
+    const rows = new Set<number>();
+    differences.forEach((key) => {
+      const [rowIndex] = key.split('-').map(Number);
+      rows.add(rowIndex);
+    });
+    return Array.from(rows).sort((a, b) => a - b);
+  }, [differences]);
+  
   // 파일 읽기 함수
   const readExcelFile = (file: File, fileNumber: 1 | 2) => {
     const reader = new FileReader();
@@ -216,6 +230,46 @@ export default function Home() {
     setManualColumnMapping(null); // 수동 매핑 제거하여 자동 매핑 사용
   }, []);
   
+  // 다음 불일치 행으로 이동
+  const goToNextDiff = useCallback(() => {
+    if (diffRows.length === 0) return;
+    
+    const nextIndex = (currentDiffIndex + 1) % diffRows.length;
+    setCurrentDiffIndex(nextIndex);
+    
+    const rowIndex = diffRows[nextIndex];
+    const rowElement = rowRefs.current.get(rowIndex);
+    
+    if (rowElement) {
+      rowElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      // 하이라이트 효과를 위한 클래스 추가
+      rowElement.classList.add('highlight-row');
+      setTimeout(() => {
+        rowElement.classList.remove('highlight-row');
+      }, 2000);
+    }
+  }, [currentDiffIndex, diffRows]);
+  
+  // 이전 불일치 행으로 이동
+  const goToPrevDiff = useCallback(() => {
+    if (diffRows.length === 0) return;
+    
+    const prevIndex = currentDiffIndex === 0 ? diffRows.length - 1 : currentDiffIndex - 1;
+    setCurrentDiffIndex(prevIndex);
+    
+    const rowIndex = diffRows[prevIndex];
+    const rowElement = rowRefs.current.get(rowIndex);
+    
+    if (rowElement) {
+      rowElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      // 하이라이트 효과를 위한 클래스 추가
+      rowElement.classList.add('highlight-row');
+      setTimeout(() => {
+        rowElement.classList.remove('highlight-row');
+      }, 2000);
+    }
+  }, [currentDiffIndex, diffRows]);
+  
   // 두 파일 비교 함수 (행 매칭 사용)
   const compareFiles = () => {
     if (file1Data.length === 0 || file2Data.length === 0) {
@@ -255,6 +309,7 @@ export default function Home() {
     });
     
     setDifferences(diffSet);
+    setCurrentDiffIndex(0); // 비교 후 첫 번째 불일치로 리셋
     console.log("차이점 개수:", diffSet.size);
   };
   
@@ -529,7 +584,7 @@ export default function Home() {
       </div>
       
       {displayData.length > 0 && (
-        <div className="overflow-auto">
+        <div ref={tableRef} className="overflow-auto">
           <table className="border-collapse border border-gray-600 table-fixed w-full">
             <thead>
               <tr>
@@ -560,9 +615,21 @@ export default function Home() {
               {dataRows.map((row, rowIndex) => {
                 const actualRowIndex = rowIndex + 1;
                 const isMatched = rowMatches.has(actualRowIndex);
+                const hasDiff = diffRows.includes(actualRowIndex);
+                const isCurrentDiff = hasDiff && diffRows[currentDiffIndex] === actualRowIndex;
                 
                 return (
-                  <tr key={rowIndex} className={!isMatched ? "opacity-50" : ""}>
+                  <tr 
+                    key={rowIndex} 
+                    ref={(el) => {
+                      if (el) {
+                        rowRefs.current.set(actualRowIndex, el);
+                      } else {
+                        rowRefs.current.delete(actualRowIndex);
+                      }
+                    }}
+                    className={`${!isMatched ? "opacity-50" : ""} ${isCurrentDiff ? "ring-2 ring-yellow-400" : ""}`}
+                  >
                     <td className="px-4 py-2 border border-gray-600 bg-gray-800 text-white text-left font-medium truncate w-16">
                       {rowIndex + 1}
                     </td>
@@ -604,6 +671,36 @@ export default function Home() {
               })}
             </tbody>
           </table>
+        </div>
+      )}
+      
+      {/* 불일치 행 이동 버튼 (고정) */}
+      {differences.size > 0 && diffRows.length > 0 && (
+        <div className="fixed bottom-6 right-6 z-50 flex flex-col gap-2">
+          <div className="bg-gray-800 border border-gray-600 rounded-lg p-3 shadow-lg">
+            <div className="text-xs text-gray-400 mb-2 text-center">
+              {currentDiffIndex + 1} / {diffRows.length}
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={goToPrevDiff}
+                className="px-3 py-2 bg-gray-700 text-white rounded hover:bg-gray-600 text-sm font-semibold"
+                title="이전 불일치"
+              >
+                ↑
+              </button>
+              <button
+                onClick={goToNextDiff}
+                className="px-3 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm font-semibold"
+                title="다음 불일치"
+              >
+                ↓
+              </button>
+            </div>
+            <div className="text-xs text-gray-400 mt-2 text-center">
+              행 {diffRows[currentDiffIndex]}
+            </div>
+          </div>
         </div>
       )}
       
